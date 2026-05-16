@@ -63,18 +63,3 @@ License
 
 The source here is public domain.
 If you find it useful, please drop me a line at andre@ignavus.net.
-
-Builds
-======
-Build status: [![GitHub Actions](https://github.com/AndreRenaud/PDFGen/workflows/Build%20and%20Test/badge.svg)](https://github.com/AndreRenaud/PDFGen/actions)
-
-Code Coverage: [![Coverage Status](https://coveralls.io/repos/github/AndreRenaud/PDFGen/badge.svg?branch=master)](https://coveralls.io/github/AndreRenaud/PDFGen?branch=master)
-
-Coverity scan: [![Coverity scan](https://scan.coverity.com/projects/11942/badge.svg)](https://scan.coverity.com/projects/andrerenaud-pdfgen)
-
-Static Analysis
-===============
-This is a code base that I use to test static analysis tools. As such the build system is quite a bit more complex than should be necessary for a project of this size.
-
-## Language Bindings
-- [RingPDFGen](https://github.com/ring-lang/ring/tree/master/extensions/ringpdfgen)
