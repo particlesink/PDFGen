@@ -208,6 +208,14 @@ static const char png_chunk_palette[] = "PLTE";
 static const char png_chunk_data[] = "IDAT";
 static const char png_chunk_end[] = "IEND";
 
+static uint32_t png_read_u32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) |
+           ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] <<  8) |
+           ((uint32_t)p[3]);
+}
+
 // Read big-endian values from a byte array (used for TTF parsing)
 static uint16_t ttf_be16(const uint8_t *p)
 {
@@ -786,7 +794,7 @@ static void restore_locale(const char *buf)
 
 #ifndef SKIP_ATTRIBUTE
 static int dstr_printf(struct dstr *str, const char *fmt, ...)
-    __attribute__((format(printf, 2, 3)));
+    __attribute__((format(gnu_printf, 2, 3)));
 #endif
 static int dstr_printf(struct dstr *str, const char *fmt, ...)
 {
@@ -843,7 +851,7 @@ static void dstr_free(struct dstr *str)
 
 #ifndef SKIP_ATTRIBUTE
 static int pdf_set_err(struct pdf_doc *doc, int errval, const char *buffer,
-                       ...) __attribute__((format(printf, 3, 4)));
+                       ...) __attribute__((format(gnu_printf, 3, 4)));
 #endif
 static int pdf_set_err(struct pdf_doc *doc, int errval, const char *buffer,
                        ...)
@@ -4015,7 +4023,7 @@ static int pdf_add_barcode_ean13(struct pdf_doc *pdf, struct pdf_object *page,
         lead = ch - '0';
         ++string;
     } else if (len != 12)
-        return pdf_set_err(pdf, -EINVAL, "Invalid EAN13 string length %lu",
+        return pdf_set_err(pdf, -EINVAL, "Invalid EAN13 string length %zu",
                            len);
 
     /* Scale and calculate dimensions */
@@ -4128,7 +4136,7 @@ static int pdf_add_barcode_upca(struct pdf_doc *pdf, struct pdf_object *page,
 
     size_t len = strlen(string);
     if (len != 12)
-        return pdf_set_err(pdf, -EINVAL, "Invalid UPCA string length %lu",
+        return pdf_set_err(pdf, -EINVAL, "Invalid UPCA string length %zu",
                            len);
 
     /* Scale and calculate dimensions */
@@ -4247,7 +4255,7 @@ static int pdf_add_barcode_ean8(struct pdf_doc *pdf, struct pdf_object *page,
 
     size_t len = strlen(string);
     if (len != 8)
-        return pdf_set_err(pdf, -EINVAL, "Invalid EAN8 string length %lu",
+        return pdf_set_err(pdf, -EINVAL, "Invalid EAN8 string length %zu",
                            len);
 
     /* Scale and calculate dimensions */
@@ -4359,7 +4367,7 @@ static int pdf_add_barcode_upce(struct pdf_doc *pdf, struct pdf_object *page,
 
     size_t len = strlen(string);
     if (len != 12)
-        return pdf_set_err(pdf, -EINVAL, "Invalid UPCE string length %lu",
+        return pdf_set_err(pdf, -EINVAL, "Invalid UPCE string length %zu",
                            len);
 
     if (*string != '0')
@@ -4993,10 +5001,9 @@ static int parse_png_header(struct pdf_img_info *info, const uint8_t *data,
             snprintf(err_msg, err_msg_length, "PNG file has zero bit depth");
             return -EINVAL;
         }
-        // ensure the width and height values have the proper byte order
-        // and copy them into the info struct.
-        header->width = ntoh32(header->width);
-        header->height = ntoh32(header->height);
+        // read big-endian directly (instead of ntoh32)
+        header->width  = png_read_u32((const uint8_t *)&header->width);
+        header->height = png_read_u32((const uint8_t *)&header->height);
         info->width = header->width;
         info->height = header->height;
         return 0;
@@ -5065,10 +5072,13 @@ static int pdf_add_png_data(struct pdf_doc *pdf, struct pdf_object *page,
             pdf_set_err(pdf, -EINVAL, "PNG file too short");
             goto free_buffers;
         }
-        const uint32_t chunk_length = ntoh32(chunk->length);
+        // read big-endian directly (instead of ntoh32)
+        const uint32_t chunk_length =
+            png_read_u32((const uint8_t *)&chunk->length);
+
         // chunk length + 4-bytes of CRC
         if (chunk_length > png_data_length - pos - 4) {
-            pdf_set_err(pdf, -EINVAL, "PNG chunk exceeds file: %d vs %ld",
+            pdf_set_err(pdf, -EINVAL, "PNG chunk exceeds file: %d vs %zd",
                         chunk_length, png_data_length - pos - 4);
             goto free_buffers;
         }
@@ -5128,7 +5138,6 @@ static int pdf_add_png_data(struct pdf_doc *pdf, struct pdf_object *page,
             if (chunk_length > 0 && chunk_length < png_data_length - pos) {
                 uint8_t *data = (uint8_t *)realloc(
                     png_data_temp, png_data_total_length + chunk_length);
-                // (uint8_t *)realloc(info.data, info.length + chunk_length);
                 if (!data) {
                     pdf_set_err(pdf, -ENOMEM, "No memory for PNG data");
                     goto free_buffers;
