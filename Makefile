@@ -1,42 +1,36 @@
-LFLAGS=-fprofile-arcs -ftest-coverage -lm
-CLANG=clang
-CLANG_FORMAT=clang-format
-XXD=xxd
+CC       ?= gcc
+CFLAGS    = -g -Wall -Werror -pipe --std=c23 -O2 -pedantic
+LFLAGS    = -lm
+XXD       = xxd
 
 ifeq ($(OS),Windows_NT)
-CFLAGS=-Wall
-CFLAGS_OBJECT=/Fo:
-CFLAGS_EXE=/Fe:
-O_SUFFIX=.obj
-EXE_SUFFIX=.exe
+  CFLAGS += -D__USE_MINGW_ANSI_STDIO=1
+  EXE     = .exe
 else
-CFLAGS=-g -Wall -pipe --std=c1x -O3 -pedantic -Wsuggest-attribute=const -Wsuggest-attribute=format -Wclobbered -Wempty-body -Wignored-qualifiers -Wmissing-field-initializers -Wold-style-declaration -Wmissing-parameter-type -Woverride-init -Wtype-limits -Wuninitialized -Wunused-but-set-parameter -fprofile-arcs -ftest-coverage
-CFLAGS_OBJECT=-o
-CFLAGS_EXE=-o
-O_SUFFIX=.o
-EXE_SUFFIX=
+  CFLAGS += -fprofile-arcs -ftest-coverage
+  LFLAGS += -fprofile-arcs -ftest-coverage
+  EXE     =
 endif
 
-TESTPROG=testprog$(EXE_SUFFIX)
+TESTPROG = testprog$(EXE)
 
-default: $(TESTPROG) tests/massive-file$(EXE_SUFFIX)
+default: $(TESTPROG) tests/massive-file$(EXE)
 
-$(TESTPROG): pdfgen$(O_SUFFIX) tests/main$(O_SUFFIX) tests/penguin$(O_SUFFIX) tests/rgb$(O_SUFFIX)
-	$(CC) $(CFLAGS_EXE) $@ pdfgen$(O_SUFFIX) tests/main$(O_SUFFIX) tests/penguin$(O_SUFFIX) tests/rgb$(O_SUFFIX) $(LFLAGS)
+$(TESTPROG): pdfgen.o tests/main.o tests/penguin.o tests/rgb.o
+	$(CC) -o $@ $^ $(LFLAGS)
 
-tests/massive-file$(EXE_SUFFIX): tests/massive-file.c pdfgen.c
-	$(CC) -I. -g -o $@ tests/massive-file.c pdfgen.c $(LFLAGS)
-
+tests/massive-file$(EXE): tests/massive-file.c pdfgen.c
+	$(CC) -I. -g -o $@ $< pdfgen.c $(LFLAGS)
 tests/fuzz-dstr: tests/fuzz-dstr.c pdfgen.c
-	$(CLANG) -I. -g -o $@ $< -fsanitize=fuzzer,address,undefined,integer
-
+	$(CC) -I. -g -o $@ $< -fsanitize=fuzzer,address,undefined,integer
 tests/fuzz-%: tests/fuzz-%.c pdfgen.c
-	$(CLANG) -I. -g -o $@ $< pdfgen.c -fsanitize=fuzzer,address,undefined,integer
-
+	$(CC) -I. -g -o $@ $< pdfgen.c -fsanitize=fuzzer,address,undefined,integer
 tests/penguin.c: data/penguin.jpg
 	# Convert data/penguin.jpg to a C source file with binary data in a variable
 	$(XXD) -i $< > $@ || ( rm -f $@ ; false )
 
+%.o: %.c
+	$(CC) -I. $(CFLAGS) -c $< -o $@
 %$(O_SUFFIX): %.c
 	$(CC) -I. -c $< $(CFLAGS_OBJECT) $@ $(CFLAGS)
 
@@ -107,5 +101,10 @@ podman-shell: podman-image
 .PHONY: default check coverage example-check fuzz-check format docs podman-image podman-build-win32 podman-infer podman-build podman-test podman-check podman-fuzz-check podman-docs podman-coverage podman-shell clean
 
 clean:
-	rm -f *$(O_SUFFIX) tests/*$(O_SUFFIX) $(TESTPROG) *.gcda *.gcno *.gcov tests/*.gcda tests/*.gcno output.pdf output_encrypted.pdf output.txt tests/fuzz-header tests/fuzz-text tests/fuzz-image-data tests/fuzz-image-file test/massive-file output.pdftk fuzz-image-file.pdf fuzz-image-data.pdf fuzz-image.dat doxygen.log tests/penguin.c fuzz.pdf output.ps output.ppm output-barcodes.txt
-	rm -rf docs/html docs/latex fuzz-artifacts infer-out coverage-html
+	rm -f pdfgen.o tests/main.o tests/penguin.o tests/rgb.o
+	rm -f $(TESTPROG) tests/massive-file$(EXE) tests/penguin.c
+	rm -f *.gcda *.gcno *.gcov tests/*.gcda tests/*.gcno
+	rm -f output.pdf output_encrypted.pdf output.txt output.ps output.ppm
+	rm -rf docs/html docs/latex coverage-html
+
+.PHONY: default clean
