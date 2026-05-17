@@ -216,6 +216,60 @@ static uint32_t png_read_u32(const uint8_t *p)
            ((uint32_t)p[3]);
 }
 
+/** PDF RunLengthEncode — PackBits variant per PDF spec §7.4.5
+ *  Returns encoded length. Caller must free *out.
+ *
+ *  Encoding:
+ *    length byte 0..127   → copy next (length+1) literal bytes  [1..128]
+ *    length byte 129..255 → repeat next byte (257-length) times [2..128]
+ *    length byte 128      → EOD
+ */
+static size_t pdf_rle_encode(const uint8_t *src, size_t src_len,
+                             uint8_t **out)
+{
+    /* Worst case: each byte as a 1-byte literal run + EOD */
+    size_t cap = src_len * 2 + 1;
+    uint8_t *dst = (uint8_t *)malloc(cap);
+    if (!dst) return 0;
+
+    size_t si = 0, di = 0;
+
+    while (si < src_len) {
+        /* Look for a run */
+        size_t run = 1;
+        while (si + run < src_len && run < 128 &&
+               src[si + run] == src[si])
+            run++;
+
+        if (run >= 3) {
+            dst[di++] = (uint8_t)(257 - run);
+            dst[di++] = src[si];
+            si += run;
+        } else {
+            /* Gather literals */
+            size_t lit_start = si;
+            size_t lit_len = 0;
+            while (si < src_len && lit_len < 128) {
+                size_t ahead = 1;
+                while (si + ahead < src_len && ahead < 128 &&
+                       src[si + ahead] == src[si])
+                    ahead++;
+                if (ahead >= 3 && lit_len > 0)
+                    break;
+                si++;
+                lit_len++;
+            }
+            dst[di++] = (uint8_t)(lit_len - 1);
+            memcpy(&dst[di], &src[lit_start], lit_len);
+            di += lit_len;
+        }
+    }
+    dst[di++] = 128; /* EOD */
+
+    *out = dst;
+    return di;
+}
+
 // Read big-endian values from a byte array (used for TTF parsing)
 static uint16_t ttf_be16(const uint8_t *p)
 {
@@ -4521,6 +4575,16 @@ static pdf_object *pdf_add_raw_grayscale8(struct pdf_doc *pdf,
     struct dstr str = INIT_DSTR;
     size_t data_len = (size_t)width * (size_t)height;
 
+    /* RLE encode the pixel data */
+    uint8_t *enc_data = NULL;
+    size_t enc_len = pdf_rle_encode(data, data_len, &enc_data);
+    if (!enc_data) {
+        pdf_set_err(pdf, -ENOMEM,
+                    "Unable to allocate memory for RLE encoding");
+     
+        return NULL;
+    }
+
     dstr_printf(&str,
                 "<<\r\n"
                 "  /Type /XObject\r\n"
@@ -4530,19 +4594,23 @@ static pdf_object *pdf_add_raw_grayscale8(struct pdf_doc *pdf,
                 "  /Height %d\r\n"
                 "  /Width %d\r\n"
                 "  /BitsPerComponent 8\r\n"
+                "  /Filter /RunLengthDecode\r\n"
                 "  /Length %zu\r\n"
                 ">>stream\r\n",
-                flexarray_size(&pdf->objects), height, width, data_len + 1);
+                flexarray_size(&pdf->objects), height, width, enc_len + 1);
 
     len = dstr_len(&str) + data_len + strlen(endstream) + 1;
     if (dstr_ensure(&str, len) < 0) {
         dstr_free(&str);
+        free(enc_data);
         pdf_set_err(pdf, -ENOMEM,
                     "Unable to allocate %zu bytes memory for image", len);
         return NULL;
     }
-    dstr_append_data(&str, data, data_len);
+    dstr_append_data(&str, enc_data, enc_len);
     dstr_append(&str, endstream);
+
+    free(enc_data);
 
     obj = pdf_add_object(pdf, OBJ_image);
     if (!obj) {
@@ -4564,6 +4632,15 @@ static struct pdf_object *pdf_add_raw_rgb24(struct pdf_doc *pdf,
     struct dstr str = INIT_DSTR;
     size_t data_len = (size_t)width * (size_t)height * 3;
 
+    /* RLE encode the pixel data */
+    uint8_t *enc_data = NULL;
+    size_t enc_len = pdf_rle_encode(data, data_len, &enc_data);
+    if (!enc_data) {
+        pdf_set_err(pdf, -ENOMEM,
+                    "Unable to allocate memory for RLE encoding");
+        return NULL;
+    }
+
     dstr_printf(&str,
                 "<<\r\n"
                 "  /Type /XObject\r\n"
@@ -4573,19 +4650,23 @@ static struct pdf_object *pdf_add_raw_rgb24(struct pdf_doc *pdf,
                 "  /Height %d\r\n"
                 "  /Width %d\r\n"
                 "  /BitsPerComponent 8\r\n"
+                "  /Filter /RunLengthDecode\r\n"
                 "  /Length %zu\r\n"
                 ">>stream\r\n",
-                flexarray_size(&pdf->objects), height, width, data_len + 1);
+                flexarray_size(&pdf->objects), height, width, enc_len + 1);
 
-    len = dstr_len(&str) + data_len + strlen(endstream) + 1;
+    len = dstr_len(&str) + enc_len + strlen(endstream) + 1;
     if (dstr_ensure(&str, len) < 0) {
         dstr_free(&str);
+        free(enc_data);
         pdf_set_err(pdf, -ENOMEM,
                     "Unable to allocate %zu bytes memory for image", len);
         return NULL;
     }
-    dstr_append_data(&str, data, data_len);
+    dstr_append_data(&str, enc_data, enc_len);
     dstr_append(&str, endstream);
+
+    free(enc_data);
 
     obj = pdf_add_object(pdf, OBJ_image);
     if (!obj) {
