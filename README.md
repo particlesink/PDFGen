@@ -62,4 +62,4 @@ License
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](http://unlicense.org/)
 
 The source here is public domain.
-If you find it useful, please drop me a line at andre@ignavus.net.
+
